@@ -1,11 +1,21 @@
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <errno.h>
 #include <poll.h>
 #include <alsa/asoundlib.h>
 
+#define PCM_DEVICE "default"
+
 snd_pcm_t *playback_handle;
 short buf[4096];
+
+struct confData{
+	snd_pcm_hw_params_t *hw_params;
+	snd_pcm_sw_params_t *sw_params;
+	//int nfds;
+	//struct pollfd *pfds;
+	unsigned int sample_rate;
+};
 
 int playback_callback(snd_pcm_sframes_t nframes)
 {
@@ -20,7 +30,8 @@ int playback_callback(snd_pcm_sframes_t nframes)
 		buf[i] = x;
 	}
 
-	if ((err = snd_pcm_writei(playback_handle, buf, nframes)) < 0)
+	err = snd_pcm_writei(playback_handle, buf, nframes);
+	if (err < 0)
 	{
 		fprintf(stderr, "write failed (%s)\n", snd_strerror(err));
 	}
@@ -28,141 +39,119 @@ int playback_callback(snd_pcm_sframes_t nframes)
 	return err;
 }
 
-main(int argc, char *argv[])
+int open_and_init(struct confData *conf)
 {
-
-	snd_pcm_hw_params_t *hw_params;
-	snd_pcm_sw_params_t *sw_params;
-	snd_pcm_sframes_t frames_to_deliver;
-	int nfds;
 	int err;
-	struct pollfd *pfds;
-	unsigned int sample_rate = (unsigned int)44100;
 
-	if ((err = snd_pcm_open(&playback_handle, argv[1], SND_PCM_STREAM_PLAYBACK, 0)) < 0)
+	err = snd_pcm_open(&playback_handle, PCM_DEVICE, SND_PCM_STREAM_PLAYBACK, 0);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot open audio device %s (%s)\n",
-				argv[1],
+				PCM_DEVICE,
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Opened\n");
-	}
 
-	if ((err = snd_pcm_hw_params_malloc(&hw_params)) < 0)
+	err = snd_pcm_hw_params_malloc(&conf->hw_params);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot allocate hardware parameter structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("hardware parameter structure allocated\n");
-	}
 
-	if ((err = snd_pcm_hw_params_any(playback_handle, hw_params)) < 0)
+	err = snd_pcm_hw_params_any(playback_handle, conf->hw_params);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot initialize hardware parameter structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Initialized hardware parameter structure\n");
-	}
 
-	if ((err = snd_pcm_hw_params_set_access(playback_handle, hw_params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0)
+	err = snd_pcm_hw_params_set_access(playback_handle, conf->hw_params, SND_PCM_ACCESS_RW_INTERLEAVED);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set access type (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Access type is set\n");
-	}
 
-	if ((err = snd_pcm_hw_params_set_format(playback_handle, hw_params, SND_PCM_FORMAT_S16_LE)) < 0)
+	err = snd_pcm_hw_params_set_format(playback_handle, conf->hw_params, SND_PCM_FORMAT_S16_LE);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set sample format (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Sample format is set\n");
-	}
 	/*
 	snd_pcm_hw_params_set_access(playback_handle, hw_params, SND_PCM_ACCESS_RW_NONINTERLEAVED);
 	snd_pcm_hw_params_set_format(playback_handle, hw_params, SND_PCM_FORMAT_S16_LE);*/
 
-	if ((err = snd_pcm_hw_params_set_rate_near(playback_handle, hw_params, &sample_rate, 0)) < 0)
+	err = snd_pcm_hw_params_set_rate_near(playback_handle, conf->hw_params, &conf->sample_rate, 0);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set sample rate (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Sample rate is set\n");
-	}
 
-	if ((err = snd_pcm_hw_params_set_channels(playback_handle, hw_params, 1)) < 0)
+	err = snd_pcm_hw_params_set_channels(playback_handle, conf->hw_params, 1);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set channel count (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Chanel count is set\n");
-	}
 
-	if ((err = snd_pcm_hw_params(playback_handle, hw_params)) < 0)
+	err = snd_pcm_hw_params(playback_handle, conf->hw_params);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set parameters (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	else
-	{
-		printf("Parameters is set\n");
-	}
 
-	snd_pcm_hw_params_free(hw_params);
+	snd_pcm_hw_params_free(conf->hw_params);
 
 	/* tell ALSA to wake us up whenever 4096 or more frames
 		   of playback data can be delivered. Also, tell
 		   ALSA that we'll start the device ourselves.
 		*/
 
-	if ((err = snd_pcm_sw_params_malloc(&sw_params)) < 0)
+	err = snd_pcm_sw_params_malloc(&conf->sw_params);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot allocate software parameters structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	if ((err = snd_pcm_sw_params_current(playback_handle, sw_params)) < 0)
+
+	err = snd_pcm_sw_params_current(playback_handle, conf->sw_params);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot initialize software parameters structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	if ((err = snd_pcm_sw_params_set_avail_min(playback_handle, sw_params, 4096)) < 0)
+
+	err = snd_pcm_sw_params_set_avail_min(playback_handle, conf->sw_params, 4096);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set minimum available count (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	if ((err = snd_pcm_sw_params_set_start_threshold(playback_handle, sw_params, 0U)) < 0)
+
+	err = snd_pcm_sw_params_set_start_threshold(playback_handle, conf->sw_params, 0U);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set start mode (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
-	if ((err = snd_pcm_sw_params(playback_handle, sw_params)) < 0)
+
+	err = snd_pcm_sw_params(playback_handle, conf->sw_params);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot set software parameters (%s)\n",
 				snd_strerror(err));
@@ -173,12 +162,26 @@ main(int argc, char *argv[])
 		   will wake up this program very soon after that.
 		*/
 
-	if ((err = snd_pcm_prepare(playback_handle)) < 0)
+	err = snd_pcm_prepare(playback_handle);
+	if (err < 0)
 	{
 		fprintf(stderr, "cannot prepare audio interface for use (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
+
+	return 0;
+}
+
+main(int argc, char *argv[])
+{
+	int err;
+	int frames_played;
+	snd_pcm_sframes_t frames_to_deliver;
+	struct confData *conf;
+	conf->sample_rate = (unsigned int)44100; // set sample rate and device names
+
+	open_and_init(conf);
 
 	while (1)
 	{
@@ -195,7 +198,8 @@ main(int argc, char *argv[])
 
 		/* find out how much space is available for playback data */
 
-		if ((frames_to_deliver = snd_pcm_avail_update(playback_handle)) < 0)
+		frames_to_deliver = snd_pcm_avail_update(playback_handle);
+		if (frames_to_deliver < 0)
 		{
 			if (frames_to_deliver == -EPIPE)
 			{
@@ -213,14 +217,13 @@ main(int argc, char *argv[])
 		frames_to_deliver = frames_to_deliver > 4096 ? 4096 : frames_to_deliver;
 
 		/* deliver the data */
-
-		if (playback_callback(frames_to_deliver) != frames_to_deliver)
+		frames_played= playback_callback(frames_to_deliver);
+		if (frames_played != frames_to_deliver)
 		{
 			fprintf(stderr, "playback callback failed\n");
 			break;
 		}
 	}
-
 	snd_pcm_close(playback_handle);
 	exit(0);
 }
