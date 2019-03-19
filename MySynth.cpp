@@ -5,22 +5,24 @@
 #include <alsa/asoundlib.h>
 
 #define PLAYBACK_DEVICE "hw:3,0"
-#define CAPTURE_DEVICE "hw:2,0" 
+#define CAPTURE_DEVICE "hw:2,0"
 
 #define PCM_DEVICE "default"
 
 
 // g++ MySynth.cpp -o MySynth -lasound
 snd_pcm_t *capture_handle;
-snd_pcm_t *playback_handle;
+
 
 short buf[4096];
+
+snd_pcm_t *playback_handle;
 
 struct confData{
 	snd_pcm_hw_params_t *hw_playback_params;
 	snd_pcm_sw_params_t *sw_playback_params;
 	snd_pcm_hw_params_t *hw_capture_params;
-	snd_pcm_sw_params_t *sw_capture_params;	
+	snd_pcm_sw_params_t *sw_capture_params;
 	unsigned int sample_rate;
 };
 
@@ -50,8 +52,9 @@ int open_and_init(struct confData *conf)
 {
 	int err;
 
-	// open playback device	
-	err = snd_pcm_open(&playback_handle, PLAYBACK_DEVICE, SND_PCM_STREAM_PLAYBACK, 0);	
+
+	// open playback device
+	err = snd_pcm_open(&playback_handle, PLAYBACK_DEVICE, SND_PCM_STREAM_PLAYBACK, 0);
 	if (err < 0)
 	{
 		fprintf(stderr, "cannot open output audio device %s (%s)\n",
@@ -103,7 +106,7 @@ int open_and_init(struct confData *conf)
 		exit(1);
 	}
 
-	//set access type 
+	//set access type
 	err = snd_pcm_hw_params_set_access(playback_handle, conf->hw_playback_params, SND_PCM_ACCESS_RW_INTERLEAVED);
 	if (err < 0)
 	{
@@ -136,7 +139,7 @@ int open_and_init(struct confData *conf)
 				snd_strerror(err));
 		exit(1);
 	}
-	
+
 	//set sample rate
 	err = snd_pcm_hw_params_set_rate_near(playback_handle, conf->hw_playback_params, &conf->sample_rate, 0);
 	if (err < 0)
