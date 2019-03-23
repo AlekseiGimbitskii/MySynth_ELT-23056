@@ -14,8 +14,7 @@
 snd_pcm_t *capture_handle;
 snd_pcm_t *playback_handle;
 
-struct confData
-{
+struct confData {
 	snd_pcm_hw_params_t *hw_playback_params;
 	snd_pcm_sw_params_t *sw_playback_params;
 	snd_pcm_hw_params_t *hw_capture_params;
@@ -23,23 +22,20 @@ struct confData
 	unsigned int sample_rate;
 };
 
-void dummyFilter(short buf[])
-{
+void dummyFilter(short buf[]) {
 	buf[1] = buf[1] - buf[0];
 	for(int i = 2; i < BUF_SIZE; i++ ){
-		buf[i] = buf[i] - buf[i-1] - buf[i-2];
+		buf[i] = buf[i] - buf[i - 1] - buf[i - 2];
 	}
 }
 
-int playback_callback(snd_pcm_sframes_t nframes, short buf[])
-{
+int playback_callback(snd_pcm_sframes_t nframes, short buf[]) {
 	int err;
 
 	printf("playback callback called with %lu frames\n", nframes);
 
 	err = snd_pcm_writei(playback_handle, buf, nframes);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "write failed (%s)\n", snd_strerror(err));
 	}
 
@@ -54,8 +50,7 @@ int capture_callback(snd_pcm_sframes_t nframes, short buf[]){
 
 	/* ... fill buf with data ... */
 	err = snd_pcm_readi(capture_handle, buf, nframes);
-	if (err != nframes)
-	{
+	if (err != nframes)	{
 		fprintf(stderr, "read failed (%s)\n", snd_strerror(err));
 	}
 
@@ -68,8 +63,7 @@ int open_and_init(struct confData *conf)
 
 	// open playback device
 	err = snd_pcm_open(&playback_handle, PLAYBACK_DEVICE, SND_PCM_STREAM_PLAYBACK, 0);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot open output audio device %s (%s)\n",
 				PLAYBACK_DEVICE,
 				snd_strerror(err));
@@ -77,8 +71,7 @@ int open_and_init(struct confData *conf)
 	}
 	// open capture device
 	err = snd_pcm_open(&capture_handle, CAPTURE_DEVICE, SND_PCM_STREAM_CAPTURE, 0);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot open input audio device %s (%s)\n",
 				CAPTURE_DEVICE,
 				snd_strerror(err));
@@ -87,16 +80,14 @@ int open_and_init(struct confData *conf)
 
 	//allocate hw params
 	err = snd_pcm_hw_params_malloc(&conf->hw_playback_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot allocate playback hardware parameter structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params_malloc(&conf->hw_capture_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot allocate capture hardware parameter structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -104,16 +95,14 @@ int open_and_init(struct confData *conf)
 
 	// init hw_param structures
 	err = snd_pcm_hw_params_any(playback_handle, conf->hw_playback_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot initialize playback hardware parameter structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params_any(capture_handle, conf->hw_capture_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot initialize capture hardware parameter structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -121,16 +110,14 @@ int open_and_init(struct confData *conf)
 
 	//set access type
 	err = snd_pcm_hw_params_set_access(playback_handle, conf->hw_playback_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set access type (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params_set_access(capture_handle, conf->hw_capture_params, SND_PCM_ACCESS_RW_INTERLEAVED);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set access type (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -138,16 +125,14 @@ int open_and_init(struct confData *conf)
 
 	//set sample formats
 	err = snd_pcm_hw_params_set_format(playback_handle, conf->hw_playback_params, SND_PCM_FORMAT_S16_LE);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set sample format (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params_set_format(capture_handle, conf->hw_capture_params, SND_PCM_FORMAT_S16_LE);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set sample format (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -155,16 +140,14 @@ int open_and_init(struct confData *conf)
 
 	//set sample rate
 	err = snd_pcm_hw_params_set_rate_near(playback_handle, conf->hw_playback_params, &conf->sample_rate, 0);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set sample rate (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params_set_rate_near(capture_handle, conf->hw_capture_params, &conf->sample_rate, 0);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set sample rate (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -172,16 +155,14 @@ int open_and_init(struct confData *conf)
 
 	// set chanel count
 	err = snd_pcm_hw_params_set_channels(playback_handle, conf->hw_playback_params, 1);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set channel count (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params_set_channels(capture_handle, conf->hw_capture_params, 1);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set channel count (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -189,16 +170,14 @@ int open_and_init(struct confData *conf)
 
 	// set parameters
 	err = snd_pcm_hw_params(playback_handle, conf->hw_playback_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set parameters (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_hw_params(capture_handle, conf->hw_capture_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set parameters (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -214,40 +193,35 @@ int open_and_init(struct confData *conf)
 		*/
 
 	err = snd_pcm_sw_params_malloc(&conf->sw_playback_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot allocate software parameters structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_sw_params_current(playback_handle, conf->sw_playback_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot initialize software parameters structure (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_sw_params_set_avail_min(playback_handle, conf->sw_playback_params, 4096);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set minimum available count (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_sw_params_set_start_threshold(playback_handle, conf->sw_playback_params, 0U);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set start mode (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_sw_params(playback_handle, conf->sw_playback_params);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot set software parameters (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -258,16 +232,14 @@ int open_and_init(struct confData *conf)
 		*/
 
 	err = snd_pcm_prepare(playback_handle);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot prepare audio interface for use (%s)\n",
 				snd_strerror(err));
 		exit(1);
 	}
 
 	err = snd_pcm_prepare(capture_handle);
-	if (err < 0)
-	{
+	if (err < 0) {
 		fprintf(stderr, "cannot prepare audio interface for use (%s)\n",
 				snd_strerror(err));
 		exit(1);
@@ -276,8 +248,8 @@ int open_and_init(struct confData *conf)
 	return 0;
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
+
 	struct confData conf;
 	conf.sample_rate = (unsigned int)44100; // set sample rate
 	int err;
@@ -288,8 +260,8 @@ int main(int argc, char *argv[])
 	open_and_init(&conf);
 
 	short buf[BUF_SIZE];
-	while (1)
-	{
+	while (1) {
+
 		/* wait till the playback device is ready for data, or 1 second
 		 * has elapsed.
 		 */
