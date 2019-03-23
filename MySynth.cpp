@@ -4,21 +4,18 @@
 #include <poll.h>
 #include <alsa/asoundlib.h>
 
-#define PLAYBACK_DEVICE "hw:3,0"
-#define CAPTURE_DEVICE "hw:2,0"
+#define PLAYBACK_DEVICE "default"
+#define CAPTURE_DEVICE "hw:4,0"
 
 #define PCM_DEVICE "default"
+#define BUF_SIZE 4096
 
-
-// g++ MySynth.cpp -o MySynth -lasound
+// g++ MySynth.cpp -o MySynth.o -lasound
 snd_pcm_t *capture_handle;
-
-
-short buf[4096];
-
 snd_pcm_t *playback_handle;
 
-struct confData{
+struct confData
+{
 	snd_pcm_hw_params_t *hw_playback_params;
 	snd_pcm_sw_params_t *sw_playback_params;
 	snd_pcm_hw_params_t *hw_capture_params;
@@ -26,18 +23,19 @@ struct confData{
 	unsigned int sample_rate;
 };
 
-int playback_callback(snd_pcm_sframes_t nframes)
+void dummyFilter(short buf[])
+{
+	buf[1] = buf[1] - buf[0];
+	for(int i = 2; i < BUF_SIZE; i++ ){
+		buf[i] = buf[i] - buf[i-1] - buf[i-2];
+	}
+}
+
+int playback_callback(snd_pcm_sframes_t nframes, short buf[])
 {
 	int err;
 
 	printf("playback callback called with %lu frames\n", nframes);
-
-	/* ... fill buf with data ... */
-	err = snd_pcm_readi (capture_handle, buf, nframes);
-	if (err != nframes)
-	{
-		fprintf(stderr, "read failed (%s)\n", snd_strerror(err));
-	}
 
 	err = snd_pcm_writei(playback_handle, buf, nframes);
 	if (err < 0)
@@ -48,10 +46,25 @@ int playback_callback(snd_pcm_sframes_t nframes)
 	return err;
 }
 
+int capture_callback(snd_pcm_sframes_t nframes, short buf[]){
+
+	int err;
+
+	printf("capture callback called with %lu frames\n", nframes);
+
+	/* ... fill buf with data ... */
+	err = snd_pcm_readi(capture_handle, buf, nframes);
+	if (err != nframes)
+	{
+		fprintf(stderr, "read failed (%s)\n", snd_strerror(err));
+	}
+
+	return err;
+}
+
 int open_and_init(struct confData *conf)
 {
 	int err;
-
 
 	// open playback device
 	err = snd_pcm_open(&playback_handle, PLAYBACK_DEVICE, SND_PCM_STREAM_PLAYBACK, 0);
@@ -263,31 +276,39 @@ int open_and_init(struct confData *conf)
 	return 0;
 }
 
-main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
+	struct confData conf;
+	conf.sample_rate = (unsigned int)44100; // set sample rate
 	int err;
 	int frames_played;
-	snd_pcm_sframes_t frames_to_deliver;
-	struct confData *conf;
-	conf->sample_rate = (unsigned int)44100; // set sample rate and device names
+	int frames_captured;
+	snd_pcm_sframes_t frames_to_deliver = BUF_SIZE;
 
-	open_and_init(conf);
+	open_and_init(&conf);
 
+	short buf[BUF_SIZE];
 	while (1)
 	{
+		/* wait till the playback device is ready for data, or 1 second
+		 * has elapsed.
+		 */
 
-		/* wait till the interface is ready for data, or 1 second
-			   has elapsed.
-			*/
+		if ((err = snd_pcm_wait(playback_handle, 1000)) < 0) {
+			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
+			break;
+		}
 
-		if ((err = snd_pcm_wait(playback_handle, 1000)) < 0)
-		{
+		/* wait till the capture device is ready for data, or 1 second
+		 * has elapsed.
+		 */
+		if ((err = snd_pcm_wait(capture_handle, 1000)) < 0) {
 			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
 			break;
 		}
 
 		/* find out how much space is available for playback data */
-
+		/*
 		frames_to_deliver = snd_pcm_avail_update(playback_handle);
 		if (frames_to_deliver < 0)
 		{
@@ -304,10 +325,31 @@ main(int argc, char *argv[])
 			}
 		}
 
-		frames_to_deliver = frames_to_deliver > 4096 ? 4096 : frames_to_deliver;
+		frames_to_deliver = frames_to_deliver > BUF_SIZE ? BUF_SIZE : frames_to_deliver;
+		*/
 
+
+		// capture data
+		frames_captured = capture_callback(frames_to_deliver, buf);
+		if (frames_captured != frames_to_deliver)
+		{
+			fprintf(stderr, "capture callback failed\n");
+			break;
+		}
+
+
+		//apply dummy filter
+		dummyFilter(buf);
+
+		// prpare playback device
+		err = snd_pcm_prepare (playback_handle);
+		if (err < 0) {
+			fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
+				 snd_strerror (err));
+			exit (1);
+		}
 		/* deliver the data */
-		frames_played = playback_callback(frames_to_deliver);
+		frames_played = playback_callback(frames_to_deliver, buf);
 		if (frames_played != frames_to_deliver)
 		{
 			fprintf(stderr, "playback callback failed\n");
