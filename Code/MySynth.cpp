@@ -4,6 +4,8 @@
 #include <poll.h>
 #include <alsa/asoundlib.h>
 
+#include <stk/Noise.h>
+
 #define PLAYBACK_DEVICE "default"
 #define CAPTURE_DEVICE "hw:4,0"
 
@@ -42,7 +44,7 @@ int playback_callback(snd_pcm_sframes_t nframes, short buf[]) {
 	return err;
 }
 
-int capture_callback(snd_pcm_sframes_t nframes, short buf[]){
+int capture_callback(snd_pcm_sframes_t nframes, short buf[]) {
 
 	int err;
 
@@ -303,8 +305,7 @@ int main(int argc, char *argv[]) {
 
 		// capture data
 		frames_captured = capture_callback(frames_to_deliver, buf);
-		if (frames_captured != frames_to_deliver)
-		{
+		if (frames_captured != frames_to_deliver) {
 			fprintf(stderr, "capture callback failed\n");
 			break;
 		}
@@ -322,12 +323,23 @@ int main(int argc, char *argv[]) {
 		}
 		/* deliver the data */
 		frames_played = playback_callback(frames_to_deliver, buf);
-		if (frames_played != frames_to_deliver)
-		{
+		if (frames_played != frames_to_deliver) {
 			fprintf(stderr, "playback callback failed\n");
 			break;
 		}
 	}
 	snd_pcm_close(playback_handle);
 	exit(0);
+}
+
+using namespace stk;
+int our_noise(void)
+{
+	StkFloat output;
+	Noise noise;
+	for ( unsigned int i=0; i<20; i++ ) {
+		output = noise.tick();
+		std::cout << "i = " << i << " : output = " << output << std::endl;
+	}
+	return 0;
 }
