@@ -5,6 +5,7 @@
 #include <alsa/asoundlib.h>
 
 #include <stk/Noise.h>
+#include <stk/Iir.h>
 
 #define PLAYBACK_DEVICE "default"
 #define CAPTURE_DEVICE "default"
@@ -30,8 +31,17 @@ void applyEffect(short buf[])
 	stk::StkFrames output( BUF_SIZE, 1 );
 	for (int i=0; i < BUF_SIZE; i++){
 		output[i] = static_cast<double>(buf[i])/0x8000;
-		std::cout << "i = " << i << " : output = " << output[i] << std::endl;
 	}
+
+	//do filtering
+  	std::vector<stk::StkFloat> numerator( 5, 0.1 ); // create and initialize numerator coefficients
+  	std::vector<stk::StkFloat> denominator;         // create empty denominator coefficients
+  	denominator.push_back( 1.0 );              // populate our denomintor values
+  	denominator.push_back( 0.3 );
+  	denominator.push_back( -0.5 );
+  	stk::Iir filter( numerator, denominator );
+  	filter.tick( output );
+
 	// fill buffer with filtered values
 	for (int i=0; i < BUF_SIZE; i++){
 		buf[i]=static_cast<short>(output[i]*0x8000);
@@ -272,42 +282,25 @@ int main(int argc, char *argv[]) {
 	short buf[BUF_SIZE];
 	while (1) {
 
+
 		/* wait till the playback device is ready for data, or 1 second
 		 * has elapsed.
 		 */
-
+		/*
 		if ((err = snd_pcm_wait(playback_handle, 1000)) < 0) {
 			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
 			break;
 		}
+		*/
 
 		/* wait till the capture device is ready for data, or 1 second
 		 * has elapsed.
 		 */
+		/*
 		if ((err = snd_pcm_wait(capture_handle, 1000)) < 0) {
 			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
 			break;
 		}
-
-		/* find out how much space is available for playback data */
-		/*
-		frames_to_deliver = snd_pcm_avail_update(playback_handle);
-		if (frames_to_deliver < 0)
-		{
-			if (frames_to_deliver == -EPIPE)
-			{
-				fprintf(stderr, "an xrun occured\n");
-				break;
-			}
-			else
-			{
-				fprintf(stderr, "unknown ALSA avail update return value (%ld)\n",
-						frames_to_deliver);
-				break;
-			}
-		}
-
-		frames_to_deliver = frames_to_deliver > BUF_SIZE ? BUF_SIZE : frames_to_deliver;
 		*/
 
 
@@ -320,19 +313,24 @@ int main(int argc, char *argv[]) {
 
 
 		//apply dummy filter
-		//applyEffect(buf);
+		applyEffect(buf);
 
 		// prpare playback device
+		/*
 		err = snd_pcm_prepare (playback_handle);
 		if (err < 0) {
 			fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
 				 snd_strerror (err));
 			exit (1);
-		}
+		}*/
+
+		/* deliver the data */
+
 		/* deliver the data */
 		frames_played = playback_callback(frames_to_deliver, buf);
 		if (frames_played != frames_to_deliver) {
 			fprintf(stderr, "playback callback failed\n");
+			//snd_pcm_recover (playback_handle, frames_played, 0);
 			break;
 		}
 	}
