@@ -7,10 +7,10 @@
 #include <stk/Noise.h>
 
 #define PLAYBACK_DEVICE "default"
-#define CAPTURE_DEVICE "hw:4,0"
+#define CAPTURE_DEVICE "default"
 
 #define PCM_DEVICE "default"
-#define BUF_SIZE 4096
+#define BUF_SIZE 8192
 
 // g++ MySynth.cpp -o MySynth.o -lasound
 snd_pcm_t *capture_handle;
@@ -24,17 +24,25 @@ struct confData {
 	unsigned int sample_rate;
 };
 
-void dummyFilter(short buf[]) {
-	buf[1] = buf[1] - buf[0];
-	for(int i = 2; i < BUF_SIZE; i++ ){
-		buf[i] = buf[i] - buf[i - 1] - buf[i - 2];
+void applyEffect(short buf[])
+{
+	//init StkFrames and convert buf to fit in range -1.0 to 1.0
+	stk::StkFrames output( BUF_SIZE, 1 );
+	for (int i=0; i < BUF_SIZE; i++){
+		output[i] = static_cast<double>(buf[i])/0x8000;
+		std::cout << "i = " << i << " : output = " << output[i] << std::endl;
 	}
+	// fill buffer with filtered values
+	for (int i=0; i < BUF_SIZE; i++){
+		buf[i]=static_cast<short>(output[i]*0x8000);
+	}
+
 }
 
 int playback_callback(snd_pcm_sframes_t nframes, short buf[]) {
 	int err;
 
-	printf("playback callback called with %lu frames\n", nframes);
+	//printf("playback callback called with %lu frames\n", nframes);
 
 	err = snd_pcm_writei(playback_handle, buf, nframes);
 	if (err < 0) {
@@ -48,7 +56,7 @@ int capture_callback(snd_pcm_sframes_t nframes, short buf[]) {
 
 	int err;
 
-	printf("capture callback called with %lu frames\n", nframes);
+	//printf("capture callback called with %lu frames\n", nframes);
 
 	/* ... fill buf with data ... */
 	err = snd_pcm_readi(capture_handle, buf, nframes);
@@ -312,7 +320,7 @@ int main(int argc, char *argv[]) {
 
 
 		//apply dummy filter
-		dummyFilter(buf);
+		//applyEffect(buf);
 
 		// prpare playback device
 		err = snd_pcm_prepare (playback_handle);
@@ -333,13 +341,4 @@ int main(int argc, char *argv[]) {
 }
 
 using namespace stk;
-int our_noise(void)
-{
-	StkFloat output;
-	Noise noise;
-	for ( unsigned int i=0; i<20; i++ ) {
-		output = noise.tick();
-		std::cout << "i = " << i << " : output = " << output << std::endl;
-	}
-	return 0;
-}
+
