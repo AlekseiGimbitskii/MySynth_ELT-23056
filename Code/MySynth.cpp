@@ -2,7 +2,11 @@
 #include <stdio.h>
 #include <errno.h>
 #include <poll.h>
-#include <pthread.h>
+#include <thread>
+#include <mutex>
+#include <queue>
+#include <chrono>
+#include <iostream>
 
 #include <alsa/asoundlib.h>
 
@@ -12,15 +16,21 @@
 #define PLAYBACK_DEVICE "default"
 #define CAPTURE_DEVICE "default"
 
-#define PCM_DEVICE "default"
-#define BUF_SIZE 8192
+#define BUF_SIZE 4096*2
+#define SAMPLE_RATE 44100
 
 // g++ MySynth.cpp -o MySynth.o -lasound
 snd_pcm_t *capture_handle;
 snd_pcm_t *playback_handle;
 
-short buf[BUF_SIZE];
-//pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+//FIFO, source->capture_device, dest->effect function
+std::queue<short> capture_fifo;
+//FIFO, source->effects function, dest->playback device
+std::queue<short> playback_fifo;
+
+//mutexes to protect FIFO buffers
+std::mutex capture_mutex;
+std::mutex playback_mutex;
 
 struct confData {
 	snd_pcm_hw_params_t *hw_playback_params;
@@ -59,7 +69,7 @@ int playback_callback(snd_pcm_sframes_t nframes, short buf[])
 
 	int err;
 
-	printf("playback callback called with %lu frames\n", nframes);
+	//printf("playback callback called with %lu frames\n", nframes);
 
 	err = snd_pcm_writei(playback_handle, buf, nframes);
 	if (err < 0) {
@@ -74,7 +84,7 @@ int capture_callback(snd_pcm_sframes_t nframes, short buf[])
 
 	int err;
 
-	printf("capture callback called with %lu frames\n", nframes);
+	//printf("capture callback called with %lu frames\n", nframes);
 
 	/* ... fill buf with data ... */
 	err = snd_pcm_readi(capture_handle, buf, nframes);
@@ -85,12 +95,13 @@ int capture_callback(snd_pcm_sframes_t nframes, short buf[])
 	return err;
 }
 
-void *readThread(void *arg)
+void readThread()
 {
 	int frames_captured;
-	snd_pcm_sframes_t frames_to_deliver = BUF_SIZE;
+	snd_pcm_sframes_t frames_to_read = BUF_SIZE;
 	int err;
-
+	short buf[BUF_SIZE];
+	int delay = (BUF_SIZE*1000/SAMPLE_RATE)-10; //delay in milliseconds
 
 	while (1) {
 		/* wait till the capture device is ready for data, or 1 second
@@ -104,31 +115,66 @@ void *readThread(void *arg)
 		}
 
 		// capture data
-		frames_captured = capture_callback(frames_to_deliver, buf);
-		if (frames_captured != frames_to_deliver) {
+		frames_captured = capture_callback(frames_to_read, buf);
+		if (frames_captured != frames_to_read) {
 			fprintf(stderr, "capture callback failed\n");
 			break;
 		}
 
-
-		//apply dummy filter
-		//applyEffect(buf);
+		capture_mutex.lock();
+		for (int i = 0; i < BUF_SIZE; i++){
+			capture_fifo.push(buf[i]);
+		}
+		std::cout << "read thread: capture fifo size " << capture_fifo.size() << std::endl;
+		capture_mutex.unlock();
+		std::this_thread::sleep_for(std::chrono::milliseconds(delay));
 
 	}
-    return NULL;
 }
 
-void *writeThread(void *arg)
+void effectThread()
 {
-	snd_pcm_sframes_t frames_to_deliver = BUF_SIZE;
+	short buf[BUF_SIZE];
+	int delay = (BUF_SIZE*1000/SAMPLE_RATE)-10; //delay in milliseconds
+
+	while(1){
+
+		if (capture_fifo.size() >= BUF_SIZE){
+			capture_mutex.lock();
+			for (int i = 0; i < BUF_SIZE; i++){
+				buf[i] = capture_fifo.front();
+				capture_fifo.pop();
+			}
+			std::cout << "effect thread: capture fifo size " << capture_fifo.size() << std::endl;
+			capture_mutex.unlock();
+			//applyEffect(buf);
+
+
+			playback_mutex.lock();
+			for (int i = 0; i < BUF_SIZE; i++){
+				playback_fifo.push(buf[i]);
+			}
+			std::cout << "effect thread: playback fifo size " << playback_fifo.size() << std::endl;
+			playback_mutex.unlock();
+			std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+		}
+	}
+}
+
+void writeThread()
+{
+	snd_pcm_sframes_t frames_to_deliver;
 	int err;
 	int frames_played;
+	short buf[BUF_SIZE];
+	int delay = (BUF_SIZE*1000/SAMPLE_RATE); //delay in milliseconds
+
 
 	while (1) {
+
 		/* wait till the playback device is ready for data, or 1 second
 		 * has elapsed.
 		 */
-
 		err = snd_pcm_wait(playback_handle, 1000);
 		if (err  < 0) {
 			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
@@ -136,24 +182,46 @@ void *writeThread(void *arg)
 		}
 
 		// prpare playback device
-		/*
+
 		err = snd_pcm_prepare (playback_handle);
 		if (err < 0) {
 			fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
 				 snd_strerror (err));
 			exit (1);
 		}
-		*/
+
+		/*
+		if(playback_fifo.size() < BUF_SIZE){
+			frames_to_deliver = playback_fifo.size();
+		} else {
+			frames_to_deliver = BUF_SIZE;
+		}*/
+
+
+
 
 		/* deliver the data */
-		frames_played = playback_callback(frames_to_deliver, buf);
-		if (frames_played != frames_to_deliver) {
-			fprintf(stderr, "playback callback failed\n");
-			//snd_pcm_recover (playback_handle, frames_played, 0);
-			break;
+		if (playback_fifo.size() > (BUF_SIZE*2)){
+
+			playback_mutex.lock();
+			for (int i = 0; i < BUF_SIZE; i++){
+				buf[i] = playback_fifo.front();
+				playback_fifo.pop();
+			}
+			std::cout << "write thread: playback fifo size " << playback_fifo.size() << std::endl;
+			playback_mutex.unlock();
+
+			frames_played = playback_callback(BUF_SIZE, buf);
+			if (frames_played != BUF_SIZE) {
+				fprintf(stderr, "playback callback failed\n");
+				//snd_pcm_recover (playback_handle, BUF_SIZE, 0);
+				break;
+			}
 		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+
 	}
-    return NULL;
 }
 
 int open_and_init(struct confData *conf)
@@ -351,25 +419,23 @@ int main(int argc, char *argv[])
 {
 
 	struct confData conf;
-	conf.sample_rate = (unsigned int)44100; // set sample rate
+	conf.sample_rate = (unsigned int)SAMPLE_RATE; // set sample rate
 
 
 	open_and_init(&conf);
 
+	std::thread read_thread (readThread);
+	std::thread effect_thread (effectThread);
+	std::thread write_thread (writeThread);
 
-	// start read thread
-	pthread_t read_thread_id;
-    pthread_create(&read_thread_id, NULL, readThread, NULL);
-    //pthread_join(read_thread_id, NULL);
 
-	// start write thread
-	pthread_t write_thread_id;
-    pthread_create(&write_thread_id, NULL, writeThread, NULL);
-    //pthread_join(write_thread_id, NULL);
+	read_thread.join();
+	effect_thread.join();
+	write_thread.join();
 
 	//snd_pcm_close(playback_handle);
 	//exit(0);
-	while(1);
+	//while(1){};
 }
 
 
