@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <errno.h>
 #include <poll.h>
+#include <pthread.h>
+
 #include <alsa/asoundlib.h>
 
 #include <stk/Noise.h>
@@ -16,6 +18,9 @@
 // g++ MySynth.cpp -o MySynth.o -lasound
 snd_pcm_t *capture_handle;
 snd_pcm_t *playback_handle;
+
+short buf[BUF_SIZE];
+//pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 struct confData {
 	snd_pcm_hw_params_t *hw_playback_params;
@@ -49,10 +54,12 @@ void applyEffect(short buf[])
 
 }
 
-int playback_callback(snd_pcm_sframes_t nframes, short buf[]) {
+int playback_callback(snd_pcm_sframes_t nframes, short buf[])
+{
+
 	int err;
 
-	//printf("playback callback called with %lu frames\n", nframes);
+	printf("playback callback called with %lu frames\n", nframes);
 
 	err = snd_pcm_writei(playback_handle, buf, nframes);
 	if (err < 0) {
@@ -62,11 +69,12 @@ int playback_callback(snd_pcm_sframes_t nframes, short buf[]) {
 	return err;
 }
 
-int capture_callback(snd_pcm_sframes_t nframes, short buf[]) {
+int capture_callback(snd_pcm_sframes_t nframes, short buf[])
+{
 
 	int err;
 
-	//printf("capture callback called with %lu frames\n", nframes);
+	printf("capture callback called with %lu frames\n", nframes);
 
 	/* ... fill buf with data ... */
 	err = snd_pcm_readi(capture_handle, buf, nframes);
@@ -75,6 +83,77 @@ int capture_callback(snd_pcm_sframes_t nframes, short buf[]) {
 	}
 
 	return err;
+}
+
+void *readThread(void *arg)
+{
+	int frames_captured;
+	snd_pcm_sframes_t frames_to_deliver = BUF_SIZE;
+	int err;
+
+
+	while (1) {
+		/* wait till the capture device is ready for data, or 1 second
+		 * has elapsed.
+		 */
+
+		err = snd_pcm_wait(capture_handle, 1000);
+		if (err < 0) {
+			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
+			break;
+		}
+
+		// capture data
+		frames_captured = capture_callback(frames_to_deliver, buf);
+		if (frames_captured != frames_to_deliver) {
+			fprintf(stderr, "capture callback failed\n");
+			break;
+		}
+
+
+		//apply dummy filter
+		//applyEffect(buf);
+
+	}
+    return NULL;
+}
+
+void *writeThread(void *arg)
+{
+	snd_pcm_sframes_t frames_to_deliver = BUF_SIZE;
+	int err;
+	int frames_played;
+
+	while (1) {
+		/* wait till the playback device is ready for data, or 1 second
+		 * has elapsed.
+		 */
+
+		err = snd_pcm_wait(playback_handle, 1000);
+		if (err  < 0) {
+			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
+			break;
+		}
+
+		// prpare playback device
+		/*
+		err = snd_pcm_prepare (playback_handle);
+		if (err < 0) {
+			fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
+				 snd_strerror (err));
+			exit (1);
+		}
+		*/
+
+		/* deliver the data */
+		frames_played = playback_callback(frames_to_deliver, buf);
+		if (frames_played != frames_to_deliver) {
+			fprintf(stderr, "playback callback failed\n");
+			//snd_pcm_recover (playback_handle, frames_played, 0);
+			break;
+		}
+	}
+    return NULL;
 }
 
 int open_and_init(struct confData *conf)
@@ -268,75 +347,30 @@ int open_and_init(struct confData *conf)
 	return 0;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 
 	struct confData conf;
 	conf.sample_rate = (unsigned int)44100; // set sample rate
-	int err;
-	int frames_played;
-	int frames_captured;
-	snd_pcm_sframes_t frames_to_deliver = BUF_SIZE;
+
 
 	open_and_init(&conf);
 
-	short buf[BUF_SIZE];
-	while (1) {
 
+	// start read thread
+	pthread_t read_thread_id;
+    pthread_create(&read_thread_id, NULL, readThread, NULL);
+    //pthread_join(read_thread_id, NULL);
 
-		/* wait till the playback device is ready for data, or 1 second
-		 * has elapsed.
-		 */
-		/*
-		if ((err = snd_pcm_wait(playback_handle, 1000)) < 0) {
-			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
-			break;
-		}
-		*/
+	// start write thread
+	pthread_t write_thread_id;
+    pthread_create(&write_thread_id, NULL, writeThread, NULL);
+    //pthread_join(write_thread_id, NULL);
 
-		/* wait till the capture device is ready for data, or 1 second
-		 * has elapsed.
-		 */
-		/*
-		if ((err = snd_pcm_wait(capture_handle, 1000)) < 0) {
-			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
-			break;
-		}
-		*/
-
-
-		// capture data
-		frames_captured = capture_callback(frames_to_deliver, buf);
-		if (frames_captured != frames_to_deliver) {
-			fprintf(stderr, "capture callback failed\n");
-			break;
-		}
-
-
-		//apply dummy filter
-		applyEffect(buf);
-
-		// prpare playback device
-		/*
-		err = snd_pcm_prepare (playback_handle);
-		if (err < 0) {
-			fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
-				 snd_strerror (err));
-			exit (1);
-		}*/
-
-		/* deliver the data */
-
-		/* deliver the data */
-		frames_played = playback_callback(frames_to_deliver, buf);
-		if (frames_played != frames_to_deliver) {
-			fprintf(stderr, "playback callback failed\n");
-			//snd_pcm_recover (playback_handle, frames_played, 0);
-			break;
-		}
-	}
-	snd_pcm_close(playback_handle);
-	exit(0);
+	//snd_pcm_close(playback_handle);
+	//exit(0);
+	while(1);
 }
 
-using namespace stk;
+
 
