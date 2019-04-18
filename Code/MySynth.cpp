@@ -38,7 +38,6 @@ using namespace stk;
 snd_pcm_t *capture_handle;
 snd_pcm_t *playback_handle;
 
-<<<<<<< HEAD
 enum MySynthEffect { 
 	no_effect,
 	filter_0_500Hz,
@@ -52,8 +51,6 @@ enum MySynthEffect {
 	distortion
  };
 
-=======
->>>>>>> 7200c1725ac3139c41ec32a323c6814261a8c3d4
 struct audio_stream {
 	snd_pcm_hw_params_t *hw_playback_params;
 	snd_pcm_sw_params_t *sw_playback_params;
@@ -66,7 +63,6 @@ struct audio_stream {
 	unsigned int buffer_size;
 	snd_pcm_format_t format;
 	int channels;
-<<<<<<< HEAD
 
 	MySynthEffect current_effect = no_effect;
 
@@ -94,18 +90,10 @@ void applyEffect(struct audio_stream *stream)
 {
 	short *buf = (short *)stream->buffer;
 	Stk::setSampleRate( 44100.0 );
-=======
-};
-
-void applyEffect(struct audio_stream *stream)
-{
-	short *buf = (short *)stream->buffer;
->>>>>>> 7200c1725ac3139c41ec32a323c6814261a8c3d4
 
 	//init StkFrames and convert buf to fit in range -1.0 to 1.0
 	stk::StkFrames output(stream->frame_size, 1 );
 	for (int i=0; i < stream->frame_size; i++){
-<<<<<<< HEAD
 		output[i] = static_cast<double>(buf[i])/0x8000;		
 	}
 
@@ -158,22 +146,6 @@ void applyEffect(struct audio_stream *stream)
 
 	// fill buffer with filtered values	
 	for (int i=0; i < stream->frame_size; i++){			
-=======
-		output[i] = static_cast<double>(buf[i])/0x8000;
-	}
-
-	//do filtering
-	std::vector<stk::StkFloat> numerator( 5, 0.1 ); // create and initialize numerator coefficients
-	std::vector<stk::StkFloat> denominator;         // create empty denominator coefficients
-	denominator.push_back( 1.0 );              // populate our denomintor values
-	denominator.push_back( 0.3 );
-	denominator.push_back( -0.5 );
-	stk::Iir filter( numerator, denominator );
-	filter.tick( output );
-
-	// fill buffer with filtered values
-	for (int i=0; i < stream->frame_size; i++){
->>>>>>> 7200c1725ac3139c41ec32a323c6814261a8c3d4
 		buf[i]=static_cast<short>(output[i]*0x8000);
 	}
 
@@ -372,11 +344,8 @@ int open_and_init(struct audio_stream *stream)
 		exit(1);
 	}
 
-<<<<<<< HEAD
 
 
-=======
->>>>>>> 7200c1725ac3139c41ec32a323c6814261a8c3d4
 	err = snd_pcm_sw_params_set_avail_min(playback_handle, stream->sw_playback_params, val);
 	if (err < 0) {
 		fprintf(stderr, "cannot set minimum available count (%s)\n",
@@ -386,11 +355,7 @@ int open_and_init(struct audio_stream *stream)
 
 	//playback device will start to play when 2*BUF_SIZE of frames is available in its internal buffer
 	//increase the latency, but be sure that underflow will not happpen.
-<<<<<<< HEAD
 	err = snd_pcm_sw_params_set_start_threshold(playback_handle, stream->sw_playback_params, stream->frame_size * 3);
-=======
-	err = snd_pcm_sw_params_set_start_threshold(playback_handle, stream->sw_playback_params, stream->frame_size * 2);
->>>>>>> 7200c1725ac3139c41ec32a323c6814261a8c3d4
 	if (err < 0) {
 		fprintf(stderr, "cannot set start mode (%s)\n",
 				snd_strerror(err));
@@ -472,7 +437,6 @@ int main(int argc, char *argv[]) {
 
 	open_and_init(&stream);
 
-<<<<<<< HEAD
 
 	while (1) {
 
@@ -512,55 +476,6 @@ int main(int argc, char *argv[]) {
 		val = snd_pcm_status_get_avail_max(playback_status) - snd_pcm_avail_update(playback_handle);		
 		// D("frames available: %lu\n", val);
 
-=======
-	while (1) {
-
-		/* wait till the capture device is ready for data, or 1 second
-		 * has elapsed.
-		 */
-
-		if ((err = snd_pcm_wait(capture_handle, 1000)) < 0) {
-			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
-			break;
-		}
-
-		// capture data
-		frames_captured = capture_callback(stream.frame_size, (short *)stream.buffer);
-		if (frames_captured != stream.frame_size) {
-			fprintf(stderr, "capture callback failed\n");
-			break;
-		}
-
-		//apply dummy filter
-		applyEffect(&stream);
-
-		/*
-		// prpare playback device
-		err = snd_pcm_prepare (playback_handle);
-		if (err < 0) {
-		fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
-		snd_strerror (err));
-		exit (1);
-		}
-		 */
-
-		/* wait till the playback device is ready for data, or 1 second
-		 * has elapsed.
-		 */
-
-		if ((err = snd_pcm_wait(playback_handle, 1000)) < 0) {
-			fprintf(stderr, "poll failed (%s)\n", strerror(errno));
-			break;
-		}
-
-		//frames in buffer
-		snd_pcm_status_t *playback_status;
-		snd_pcm_status_alloca(&playback_status);
-		snd_pcm_status(playback_handle, playback_status);	
-		val = snd_pcm_status_get_avail_max(playback_status) - snd_pcm_avail_update(playback_handle);		
-		D("frames available: %lu\n", val);
-
->>>>>>> 7200c1725ac3139c41ec32a323c6814261a8c3d4
 		/* deliver the data */
 		frames_played = playback_callback(stream.frame_size, (short *)stream.buffer);
 		if (frames_played != stream.frame_size) {
