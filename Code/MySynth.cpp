@@ -6,6 +6,17 @@
 
 #include <stk/Noise.h>
 #include <stk/Iir.h>
+#include <stk/Echo.h>
+#include <stk/PitShift.h>
+#include <stk/PRCRev.h>
+#include <stk/Guitar.h>
+#include <stk/ADSR.h>
+#include <stk/Cubic.h>
+#include <stk/BiQuad.h>
+#include <stk/Modulate.h>
+#include <stk/SineWave.h>
+
+#include "Filter_taps.h"
 
 #define PLAYBACK_DEVICE "default"
 #define CAPTURE_DEVICE "default"
@@ -27,6 +38,19 @@ using namespace stk;
 snd_pcm_t *capture_handle;
 snd_pcm_t *playback_handle;
 
+enum MySynthEffect { 
+	no_effect,
+	filter_0_500Hz,
+	filter_0_2000Hz,
+	filter_0_4000Hz,
+	filter_2000_3000Hz,
+	filter_2000_6000Hz,
+	filter_2500_22050Hz,	
+	echo,	
+	modulator,
+	distortion
+ };
+
 struct audio_stream {
 	snd_pcm_hw_params_t *hw_playback_params;
 	snd_pcm_sw_params_t *sw_playback_params;
@@ -39,29 +63,89 @@ struct audio_stream {
 	unsigned int buffer_size;
 	snd_pcm_format_t format;
 	int channels;
+
+	MySynthEffect current_effect = no_effect;
+
+	//filters
+	stk::Fir filter_0_500Hz;
+	stk::Fir filter_0_2000Hz;
+	stk::Fir filter_0_4000Hz;
+	stk::Fir filter_2000_3000Hz;
+	stk::Fir filter_2000_6000Hz;
+	stk::Fir filter_2500_22050Hz;
+
+	//delay effects
+	stk::Echo echo;
+
+	//modulators
+	stk::SineWave modulator;
+
+	//non linear functions
+	stk::Cubic distortion;	
 };
+
+
 
 void applyEffect(struct audio_stream *stream)
 {
 	short *buf = (short *)stream->buffer;
+	Stk::setSampleRate( 44100.0 );
 
 	//init StkFrames and convert buf to fit in range -1.0 to 1.0
 	stk::StkFrames output(stream->frame_size, 1 );
 	for (int i=0; i < stream->frame_size; i++){
-		output[i] = static_cast<double>(buf[i])/0x8000;
+		output[i] = static_cast<double>(buf[i])/0x8000;		
 	}
 
-	//do filtering
-	std::vector<stk::StkFloat> numerator( 5, 0.1 ); // create and initialize numerator coefficients
-	std::vector<stk::StkFloat> denominator;         // create empty denominator coefficients
-	denominator.push_back( 1.0 );              // populate our denomintor values
-	denominator.push_back( 0.3 );
-	denominator.push_back( -0.5 );
-	stk::Iir filter( numerator, denominator );
-	filter.tick( output );
+	switch(stream->current_effect)
+	{
+		case no_effect : {
+			break;
+		}
+		case filter_0_500Hz : {
+			stream->filter_0_500Hz.tick(output);
+			break;
+		}
+		case filter_0_2000Hz : {
+			stream->filter_0_2000Hz.tick(output);
+			break;
+		}
+		case filter_0_4000Hz : {
+			stream->filter_0_4000Hz.tick(output);
+			break;
+		}
+		case filter_2000_3000Hz : {
+			stream->filter_2000_3000Hz.tick(output);
+			break;
+		}		
+		case filter_2000_6000Hz : {
+			stream->filter_2000_6000Hz.tick(output);
+			break;
+		}
+		case filter_2500_22050Hz : {
+			stream->filter_2500_22050Hz.tick(output);
+			break;
+		}
+		case echo : {
+			stream->echo.tick(output);
+			break;
+		}
+		case modulator : {
+			stk::StkFrames mod_output(stream->frame_size, 1 );				
+			stream->modulator.tick(mod_output);
+			for (int i=0; i < stream->frame_size; i++){
+				output[i] = output[i]*mod_output[i]*0.5;		
+			}
+			break;
+		}
+		case distortion : {
+			stream->distortion.tick(output);
+			break;
+		}	
+	}	
 
-	// fill buffer with filtered values
-	for (int i=0; i < stream->frame_size; i++){
+	// fill buffer with filtered values	
+	for (int i=0; i < stream->frame_size; i++){			
 		buf[i]=static_cast<short>(output[i]*0x8000);
 	}
 
@@ -260,6 +344,8 @@ int open_and_init(struct audio_stream *stream)
 		exit(1);
 	}
 
+
+
 	err = snd_pcm_sw_params_set_avail_min(playback_handle, stream->sw_playback_params, val);
 	if (err < 0) {
 		fprintf(stderr, "cannot set minimum available count (%s)\n",
@@ -269,7 +355,7 @@ int open_and_init(struct audio_stream *stream)
 
 	//playback device will start to play when 2*BUF_SIZE of frames is available in its internal buffer
 	//increase the latency, but be sure that underflow will not happpen.
-	err = snd_pcm_sw_params_set_start_threshold(playback_handle, stream->sw_playback_params, stream->frame_size * 2);
+	err = snd_pcm_sw_params_set_start_threshold(playback_handle, stream->sw_playback_params, stream->frame_size * 3);
 	if (err < 0) {
 		fprintf(stderr, "cannot set start mode (%s)\n",
 				snd_strerror(err));
@@ -301,6 +387,39 @@ int open_and_init(struct audio_stream *stream)
 		exit(1);
 	}
 
+	//configure effect classes
+	//filters
+	std::vector<StkFloat> v1(std::begin(filter_taps_0_500Hz), std::end(filter_taps_0_500Hz));	
+	stream->filter_0_500Hz.setCoefficients(v1);
+
+	std::vector<StkFloat> v2(std::begin(filter_taps_0_2000Hz), std::end(filter_taps_0_2000Hz));	
+	stream->filter_0_2000Hz.setCoefficients(v2);	
+
+	std::vector<StkFloat> v3(std::begin(filter_taps_0_4000Hz), std::end(filter_taps_0_4000Hz));	
+	stream->filter_0_4000Hz.setCoefficients(v3);	
+
+	std::vector<StkFloat> v4(std::begin(filter_taps_2000_3000Hz), std::end(filter_taps_2000_3000Hz));	
+	stream->filter_2000_3000Hz.setCoefficients(v4);	
+
+	std::vector<StkFloat> v5(std::begin(filter_taps_2000_6000Hz), std::end(filter_taps_2000_6000Hz));	
+	stream->filter_2000_6000Hz.setCoefficients(v5);	
+
+	std::vector<StkFloat> v6(std::begin(filter_taps_2500_22050Hz), std::end(filter_taps_2500_22050Hz));	
+	stream->filter_2500_22050Hz.setCoefficients(v6);	
+
+	//delay effects
+	stream->echo.setDelay(BUF_SIZE*2);
+
+	//modulators
+	stream->modulator.setFrequency(3);;
+
+	//non linear functions
+	stream->distortion.setThreshold( 0.2 );
+	stream->distortion.setA1( 1.0 );
+ 	stream->distortion.setA2( 0.0 );
+	stream->distortion.setA3( -1.0 / 3.0 );
+	stream->distortion.setGain(1.2);	
+
 	return 0;
 }
 
@@ -317,6 +436,7 @@ int main(int argc, char *argv[]) {
 	stream.channels = 1;
 
 	open_and_init(&stream);
+
 
 	while (1) {
 
@@ -336,18 +456,9 @@ int main(int argc, char *argv[]) {
 			break;
 		}
 
-		//apply dummy filter
+		stream.current_effect = distortion;		
 		applyEffect(&stream);
-
-		/*
-		// prpare playback device
-		err = snd_pcm_prepare (playback_handle);
-		if (err < 0) {
-		fprintf (stderr, "cannot prepare playback interface for use (%s)\n",
-		snd_strerror (err));
-		exit (1);
-		}
-		 */
+		
 
 		/* wait till the playback device is ready for data, or 1 second
 		 * has elapsed.
@@ -363,7 +474,7 @@ int main(int argc, char *argv[]) {
 		snd_pcm_status_alloca(&playback_status);
 		snd_pcm_status(playback_handle, playback_status);	
 		val = snd_pcm_status_get_avail_max(playback_status) - snd_pcm_avail_update(playback_handle);		
-		D("frames available: %lu\n", val);
+		// D("frames available: %lu\n", val);
 
 		/* deliver the data */
 		frames_played = playback_callback(stream.frame_size, (short *)stream.buffer);
