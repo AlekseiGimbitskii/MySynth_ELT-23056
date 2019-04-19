@@ -3,6 +3,10 @@
 #include <errno.h>
 #include <poll.h>
 #include <alsa/asoundlib.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <pthread.h>
 
 #include <stk/Noise.h>
 #include <stk/Iir.h>
@@ -48,8 +52,22 @@ enum MySynthEffect {
 	filter_2500_22050Hz,	
 	echo,	
 	modulator,
-	distortion
+	distortion,
+	effect_max
  };
+
+const char *effect_str[] = {
+	"no_effect",
+	"filter_0_500Hz",
+	"filter_0_2000Hz",
+	"filter_0_4000Hz",
+	"filter_2000_3000Hz",
+	"filter_2000_6000Hz",
+	"filter_2500_22050Hz",	
+	"echo",	
+	"modulator",
+	"distortion",
+};
 
 struct audio_stream {
 	snd_pcm_hw_params_t *hw_playback_params;
@@ -83,8 +101,6 @@ struct audio_stream {
 	//non linear functions
 	stk::Cubic distortion;	
 };
-
-
 
 void applyEffect(struct audio_stream *stream)
 {
@@ -423,6 +439,57 @@ int open_and_init(struct audio_stream *stream)
 	return 0;
 }
 
+void *read_input(void *args)
+{
+	FILE *fp;
+	char buf[64];
+	int fd;
+	int ret;
+	int *effect = (int *)args;
+
+	fp = popen("/usr/bin/python3 -u input.py", "r");
+	if (!fp) {
+		perror("popen():");
+		return NULL;
+	}
+
+	fd = fileno(fp);
+	if (fd == -1) {
+		perror("fileno():");
+		return NULL;
+	}
+
+	while (1) {
+		ret = read(fd, buf, 2);
+		if (ret != 2) {
+			perror("read():");
+			return NULL;
+		}
+		buf[1] = '\0';
+		ret = atoi(buf);
+		printf("key %d\n", ret);
+
+		if (ret == 7) {
+			if (++*effect == effect_max)
+				*effect = no_effect;	
+		} else if (ret == 6) {
+			if (*effect == no_effect)
+				*effect = effect_max - 1;
+			else
+				(*effect)--;
+		}
+
+		printf("effect %d\n", *effect);
+
+		snprintf(buf, 64, "/usr/bin/python3 display.py %s", effect_str[*effect]);
+		printf("command line %s\n", buf);
+		system(buf);
+	}
+
+	pclose(fp);
+	return NULL;
+}
+
 int main(int argc, char *argv[]) {
 
 	struct audio_stream stream;
@@ -430,13 +497,20 @@ int main(int argc, char *argv[]) {
 	int frames_played;
 	int frames_captured;
 	snd_pcm_uframes_t val;
+	pthread_t thread;
 
 	stream.format = SND_PCM_FORMAT_S16_LE;
 	stream.sample_rate = (unsigned int)44100; // set sample rate
 	stream.channels = 1;
+	stream.current_effect = no_effect;
+
+	err = pthread_create(&thread, NULL, read_input, &stream.current_effect);
+	if (err) {
+		perror("ptrhead_create():");
+		return -1;
+	}
 
 	open_and_init(&stream);
-
 
 	while (1) {
 
@@ -456,7 +530,6 @@ int main(int argc, char *argv[]) {
 			break;
 		}
 
-		stream.current_effect = distortion;		
 		applyEffect(&stream);
 		
 
